@@ -143,7 +143,7 @@ const ClipboardIndicator = GObject.registerClass({
         });
 
         this._buttonText = new St.Label({
-            text: _('Text will be here'),
+            text: '...',
             y_align: Clutter.ActorAlign.CENTER
         });
 
@@ -159,6 +159,9 @@ const ClipboardIndicator = GObject.registerClass({
         this.add_child(hbox);
         this._createHistoryLabel();
         this._loadSettings();
+        // The cache is read asynchronously, so apply the display mode before
+        // it is: in icon-only mode the label must never show
+        this._updateTopbarLayout();
 
         if (CLEAR_ON_BOOT) this.registry.clearCacheFolder();
 
