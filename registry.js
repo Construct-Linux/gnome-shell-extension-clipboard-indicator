@@ -75,15 +75,15 @@ export class Registry {
                 file.query_info_async('*', FileQueryInfoFlags.NONE,
                                       GLib.PRIORITY_DEFAULT, null, (src, res) => {
                     // Check if file size is larger than CACHE_FILE_SIZE
-                    // If so, make a backup of file, and resolve with empty array
+                    // If so, make a backup of file and keep only the favorites,
+                    // which exist nowhere else
                     let file_info = src.query_info_finish(res);
+                    const oversize = file_info.get_size() >= CACHE_FILE_SIZE * 1024 * 1024;
 
-                    if (file_info.get_size() >= CACHE_FILE_SIZE * 1024 * 1024) {
+                    if (oversize) {
                         let destination = Gio.file_new_for_path(this.BACKUP_REGISTRY_PATH);
 
-                        file.move(destination, FileCopyFlags.OVERWRITE, null, null);
-                        resolve([]);
-                        return;
+                        file.copy(destination, FileCopyFlags.OVERWRITE, null, null);
                     }
 
                     file.load_contents_async(null, (obj, res) => {
@@ -115,7 +115,8 @@ export class Registry {
 
                             Promise.all(entriesPromises).then(clipboardEntries => {
                                 clipboardEntries = clipboardEntries
-                                    .filter(entry => entry !== null);
+                                    .filter(entry => entry !== null)
+                                    .filter(entry => !oversize || entry.isFavorite());
 
                                 let registryNoFavorite = clipboardEntries
                                     .filter(entry => !entry.isFavorite());
