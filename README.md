@@ -1,110 +1,52 @@
-# 📋 Clipboard Indicator
+# Clipboard Indicator (CONSTRUCT fork)
 
-[<img src="https://raw.githubusercontent.com/andyholmes/gnome-shell-extensions-badge/eb9af9a1c6f04eb060cb01de6aeb5c84232cd8c0/get-it-on-ego.svg?sanitize=true" width="180" alt="Get it on GNOME Extensions">](https://extensions.gnome.org/extension/779/clipboard-indicator/)
+Clipboard Indicator keeps a clipboard history in the GNOME Shell top bar:
+text and images, pinned and tagged entries, search, editing, private mode,
+excluded apps and keyboard shortcuts.
 
+This is the fork CONSTRUCT ships. Its `gnome-51` branch is upstream's v71
+plus the patches below, and targets GNOME Shell 51 only.
 
+## Changes from upstream
 
-The most popular, reliable and feature-rich clipboard manager for GNOME with
-over **2M** downloads.
+- **Runs on GNOME Shell 51** (upstream PR #641): the virtual keyboard comes
+  from `global.stage.context.get_backend()`, since
+  `Clutter.get_default_backend()` is gone, and vertical boxes set
+  `St.BoxLayout`'s `orientation`, since `vertical` is gone. A failed menu
+  build is logged instead of leaving the listener unstarted.
+- **A corrupt cache no longer kills the extension** (upstream #589, from
+  PR #620): malformed JSON in `registry.txt` is backed up and the history
+  starts empty.
+- **Pinned entries survive an oversize cache** (upstream #385): when the
+  cache passes the size limit the history is cleared but the favorites are
+  kept.
+- **Paste pastes the chosen entry** (upstream #443 and #543, from PR #639):
+  the clipboard is no longer reverted 50 ms after the synthetic paste.
+- **No placeholder text at every unlock** (upstream #594): the display mode
+  is applied before the history loads, so "Text will be here" never shows.
+- **GNOME Shell 51 only**: `metadata.json` lists 51, and the compatibility
+  shim for older shells is gone.
+- **Repository trimmed** to what the package is built from: no screenshot,
+  extensions.gnome.org zip targets, or committed `.mo` and
+  `gschemas.compiled` build outputs.
 
-<img src="./screenshot.png" width="400" alt="A screenshot of the clipboard manager, showing clipboard history including images">
+## Building
 
-This extension is also packaged by the community for many popular Linux distros
-— search your package manager.
+spin-desktop's `recipes/gnome-shell-extension-clipboard-indicator.yaml`
+installs it by hand: `*.js`, `metadata.json` and `stylesheet.css` into
+`/usr/share/gnome-shell/extensions/clipboard-indicator@tudmotu.com`, the
+schema into `/usr/share/glib-2.0/schemas` (compiled with the image's), and
+each `locale/*/LC_MESSAGES/*.po` compiled with `msgfmt` into
+`/usr/share/locale/<lang>/LC_MESSAGES/clipboard-indicator.mo`.
 
-## 🧰 Features
+`make update-po-files` refreshes the template and the catalogs from the
+sources.
 
-* **Image support** — Copy and paste images in addition to text
-* **Pin items** — Keep important clipboard entries at the top of the menu
-* **Search** — Find clipboard entries with text search, including regex
-* **Edit entries** — Modify existing text entries
-* **Tag entries** — Add custom labels to organize your clipboard
-* **Keyboard shortcuts** — Open/close menu, cycle through entries and activate actions without touching the mouse
-* **Auto-clear history** — Schedule automatic clipboard cleanup at regular intervals or at boot time
-* **Private mode** — Temporarily pause clipboard history when working with sensitive data
-* **Exclude apps** — Prevent clipboard tracking when specific applications are in focus (e.g., password managers)
-* **Highly configurable** — Many more settings to control UI & behavior
+## Attribution and license
 
-### In-Menu Keyboard Controls
+Clipboard Indicator is by Yotam Bar-On and its contributors:
+<https://github.com/Tudmotu/gnome-shell-extension-clipboard-indicator>.
+The GNOME 51 port is by Joseph Sellers with Robert Mader, the cache fix by
+Leonardo Gallego, the paste fix by Arlandaren.
 
-- Use arrows to navigate
-- `<Enter>` to select an item
-- `<Delete>` to delete an item
-- `v` to paste directly from menu
-- `p` to pin item
-- `t` to add a tag
-- `h` to preview image
-- `e` to edit entry
-
-### Terminal support
-
-Pasting from the menu works by sending Shift+Insert to programs or Ctrl+Shift+Insert to terminals.
-
-- To use with tmux, add this to your `.tmux.conf`:
-
-  ```bash
-  # Add Ctrl Shift Insert to paste for clipboard-indicator
-  bind -T root C-S-IC {
-    run "tmux send-key \"$(xclip -d ${DISPLAY} -o -selection clipboard)\""
-  }
-  ```
-
-- To use with Ghostty, add this to your `.config/ghostty/config`:
-
-  ```bash
-  # Add Ctrl Shift Insert to paste for clipboard-indicator
-  keybind = ctrl+shift+insert=paste_from_clipboard
-  ```
-
-### Known issues
-
-- Copying large images causes a short freeze
-- Pasting via menu doesn't work for every application
-
-## 📦 Install from source
-
-Installation via git is performed by cloning the repo into your local gnome-shell extensions directory (usually `~/.local/share/gnome-shell/extensions/`):
-
-```bash
-$ git clone https://github.com/Tudmotu/gnome-shell-extension-clipboard-indicator.git <extensions-dir>/clipboard-indicator@tudmotu.com
-```
-
-After cloning the repo, the extension is practically installed yet disabled. In order to enable it, run the following command:
-
-```bash
-$ gnome-extensions enable clipboard-indicator@tudmotu.com
-```
-
-## ✅ GNOME Version Support
-
-Depending on your GNOME version, you will need to install the following
-Clipboard Indicator versions:
-
-* GNOME 46 and above:
-  * Use latest version
-* GNOME 45:
-  * v57
-* GNOME 42-44
-  * v47
-* GNOME 40-41
-  * v39
-* GNOME <40
-  * v37
-
-## ⌨️ Contributing
-
-Contributions to this project are welcome.
-
-Please follow these guidelines when contributing:
-
-- If you want to contribute code, your best bet is to look for an issue with the label "Up for grabs"
-- DO NOT open unsolicited PRs unless they are for updating translations
-- Look at the list of previous PRs before you open a PR, if your PR conflicts with another, it will be rejected
-- If you have a feature idea, open an issue and discuss it there before implementing. DO NOT open a PR as a platform for discussion
-
-### Release Cycle
-
-This project loosely follows the release cycle of GNOME. That means it will
-usually receive 2 updates a year, close to the release of a new major GNOME
-version. If there are features you'd like to implement or suggest, it is advised
-to start the discussion a month or two before a GNOME release.
+MIT; see `LICENSE.rst`.
