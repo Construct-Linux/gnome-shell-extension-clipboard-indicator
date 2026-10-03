@@ -94,7 +94,6 @@ const ClipboardIndicator = GObject.registerClass({
         this._clearDelayedSelectionTimeout();
         this.#clearTimeouts();
         this.#closeImagePreview();
-        this._removeHistoryLabel();
         this._destroyNotifSource();
         this.dialogManager.destroy();
         this.keyboard.destroy();
@@ -121,9 +120,7 @@ const ClipboardIndicator = GObject.registerClass({
         this.keyboard = new Keyboard();
         this._settingsChangedId = null;
         this._selectionOwnerChangedId = null;
-        this._historyLabel = null;
         this._buttonText = null;
-        this._disableDownArrow = null;
 
         this._shortcutsBindingIds = [];
         this.clipItemsRadioGroup = [];
@@ -154,7 +151,6 @@ const ClipboardIndicator = GObject.registerClass({
         this._downArrow = PopupMenu.arrowIcon(St.Side.BOTTOM);
         hbox.add_child(this._downArrow);
         this.add_child(hbox);
-        this._createHistoryLabel();
         this._loadSettings();
         // The cache is read asynchronously, so apply the display mode before
         // it is: in icon-only mode the label must never show
@@ -1059,11 +1055,6 @@ const ClipboardIndicator = GObject.registerClass({
         this._updateCache();
     }
 
-    _findItem (text) {
-        return this.clipItemsRadioGroup.filter(
-            item => item.clipContents === text)[0];
-    }
-
     _getCurrentlySelectedItem () {
         return this.clipItemsRadioGroup.find(item => item.currentlySelected);
     }
@@ -1307,27 +1298,6 @@ const ClipboardIndicator = GObject.registerClass({
         }
 
         this._notifSource.addNotification(notification);
-    }
-
-    _createHistoryLabel () {
-        this._historyLabel = new St.Label({
-            style_class: 'ci-notification-label',
-            text: ''
-        });
-
-        global.stage.add_child(this._historyLabel);
-
-        this._historyLabel.hide();
-    }
-
-    _removeHistoryLabel () {
-        if (this._historyLabel) {
-            if (this._historyLabel.get_parent()) {
-                global.stage.remove_child(this._historyLabel);
-            }
-            this._historyLabel.destroy();
-            this._historyLabel = null;
-        }
     }
 
     togglePrivateMode () {
