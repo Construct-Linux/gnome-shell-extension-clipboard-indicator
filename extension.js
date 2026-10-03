@@ -1,5 +1,6 @@
 import Clutter from 'gi://Clutter';
 import Cogl from 'gi://Cogl';
+import GLib from 'gi://GLib';
 import GObject from 'gi://GObject';
 import Meta from 'gi://Meta';
 import Shell from 'gi://Shell';
@@ -1918,8 +1919,12 @@ const ClipboardIndicator = GObject.registerClass({
             return null;
 
         for (const type of MIMETYPES.filter(t => offered.includes(t))) {
+            // GJS hands a callback its GBytes without a reference of its own, valid only while the
+            // callback runs: St frees it on return, and using it after the await crashed the shell
+            // (in GJS's GBytesIn release, on the next call it was passed to). Copied here.
             const bytes = await new Promise(resolve =>
-                this.extension.clipboard.get_content(CLIPBOARD_TYPE, type, (clipBoard, bytes) => resolve(bytes)));
+                this.extension.clipboard.get_content(CLIPBOARD_TYPE, type,
+                    (clipBoard, content) => resolve(content ? new GLib.Bytes(content.toArray()) : null)));
             if (bytes === null || bytes.get_size() === 0)
                 continue;
 
