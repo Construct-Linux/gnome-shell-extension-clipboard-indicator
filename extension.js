@@ -68,7 +68,7 @@ export default class ClipboardIndicatorExtension extends Extension {
         this.clipboardIndicator = new ClipboardIndicator({
             clipboard: St.Clipboard.get_default(),
             settings: this.getSettings(),
-            openSettings: this.openPreferences,
+            openSettings: () => this.openPreferences(),
             uuid: this.uuid
         });
 
