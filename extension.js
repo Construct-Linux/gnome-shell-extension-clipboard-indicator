@@ -22,6 +22,11 @@ const CLIPBOARD_TYPE = St.ClipboardType.CLIPBOARD;
 
 const INDICATOR_ICON = 'edit-paste-symbolic';
 
+// Text is kept in memory, rewritten into the registry on every change and
+// matched on every search keystroke; past this size a copy is not recorded.
+// Images live on disk (see Registry.writeEntryFile) and are not capped.
+const MAX_TEXT_ENTRY_BYTES = 1024 * 1024;
+
 let DELAYED_SELECTION_TIMEOUT = 750;
 let MAX_REGISTRY_LENGTH       = 15;
 let MAX_ENTRY_LENGTH          = 50;
@@ -539,14 +544,20 @@ const ClipboardIndicator = GObject.registerClass({
         }
     }
 
+    // Collapses whitespace runs and cuts to length characters, reading only
+    // as far as that: an entry can be a megabyte of text.
     _truncate (string, length) {
-        let shortened = string.replace(/\s+/g, ' ');
-
-        let chars = [...shortened]
-        if (chars.length > length)
-            shortened = chars.slice(0, length - 1).join('') + '...';
-
-        return shortened;
+        const chars = [];
+        let inSpace = false;
+        for (const c of string) {
+            const isSpace = /\s/.test(c);
+            if (!(isSpace && inSpace))
+                chars.push(isSpace ? ' ' : c);
+            inSpace = isSpace;
+            if (chars.length > length)
+                return chars.slice(0, length - 1).join('') + '...';
+        }
+        return chars.join('');
     }
 
     _setEntryLabel (menuItem) {
@@ -1010,6 +1021,9 @@ const ClipboardIndicator = GObject.registerClass({
             }
 
             if (result) {
+                if (result.isText() && result.size() > MAX_TEXT_ENTRY_BYTES)
+                    return;
+
                 for (let menuItem of this.clipItemsRadioGroup) {
                     if (menuItem.entry.equals(result)) {
                         this._selectMenuItem(menuItem, false);
