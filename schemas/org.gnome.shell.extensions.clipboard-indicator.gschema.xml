@@ -18,14 +18,6 @@
         </description>
     </key>
 
-    <key name="enable-deletion" type="b">
-        <default>true</default>
-        <summary>Enable the deletion of clipboard items from your history</summary>
-        <description>
-            If true, displays 'delete' buttons on each item, and a 'Clear History' option
-        </description>
-    </key>
-
     <key type="i" name="history-size">
         <default>15</default>
         <summary>The number of items to save in history</summary>
@@ -162,13 +154,6 @@
         </description>
     </key>
 
-    <key name="strip-text" type="b">
-        <default>false</default>
-        <summary>Remove whitespace around text</summary>
-        <description>
-            If true, white spaces around text will be removed.
-        </description>
-    </key>
     <key name="move-item-first" type="b">
         <default>false</default>
         <summary>Move items to the top of the list when selected.</summary>
