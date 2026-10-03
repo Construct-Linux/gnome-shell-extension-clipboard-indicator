@@ -1380,8 +1380,8 @@ const ClipboardIndicator = GObject.registerClass({
     }
 
     // The menu exists from here on; each handler redoes only what its keys
-    // change. next-history-clear, which the timer writes itself, and keys
-    // read when used are left to the fetch connected in _loadSettings.
+    // change. Keys read when used are left to the fetch connected in
+    // _loadSettings.
     _connectMenuSettings () {
         const { settings } = this.extension;
         const connect = (keys, handler) => {
