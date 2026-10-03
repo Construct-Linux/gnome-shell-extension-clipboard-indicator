@@ -113,6 +113,7 @@ const ClipboardIndicator = GObject.registerClass({
 }, class ClipboardIndicator extends PanelMenu.Button {
     #refreshInProgress = false;
     #_imagePreviewOverlay = null;
+    #settingClipboard = false;
 
     destroy () {
         this._destroyed = true;
@@ -999,11 +1000,6 @@ const ClipboardIndicator = GObject.registerClass({
             }
         }
 
-        // Ensure MOVE_ITEM_FIRST also applies when PASTE_ON_SELECT fast-path skips _refreshIndicator()
-        if (PASTE_ON_SELECT && MOVE_ITEM_FIRST && !menuItem.entry.isFavorite()) {
-            this._moveItemFirst(menuItem);
-        }
-
         menuItem.menu.close();
     }
 
@@ -1021,6 +1017,10 @@ const ClipboardIndicator = GObject.registerClass({
     }
 
     async _onSelectionChange (selection, selectionType, selectionSource) {
+        // our own set_content: the entry is already in the history
+        if (this.#settingClipboard)
+            return;
+
         if (selectionType === Meta.SelectionType.SELECTION_CLIPBOARD) {
             this._refreshIndicator();
         }
@@ -1910,8 +1910,20 @@ const ClipboardIndicator = GObject.registerClass({
     }
 
     #clearClipboard () {
-        this.extension.clipboard.set_text(CLIPBOARD_TYPE, "");
+        this.#setClipboard(() => this.extension.clipboard.set_text(CLIPBOARD_TYPE, ""));
         this.#updateIndicatorContent(null);
+    }
+
+    // MetaSelection emits owner-changed from inside set_content
+    // (meta-selection.c:132), so the flag covers exactly our own change.
+    #setClipboard (set) {
+        this.#settingClipboard = true;
+        try {
+            set();
+        }
+        finally {
+            this.#settingClipboard = false;
+        }
     }
 
     async #updateClipboard (entry) {
@@ -1927,8 +1939,15 @@ const ClipboardIndicator = GObject.registerClass({
         if (this._destroyed)
             return;
 
-        this.extension.clipboard.set_content(CLIPBOARD_TYPE, entry.mimetype(), bytes);
+        this.#setClipboard(() =>
+            this.extension.clipboard.set_content(CLIPBOARD_TYPE, entry.mimetype(), bytes));
         this.#updateIndicatorContent(entry);
+
+        // putting an entry back on the clipboard moves it up like a new copy
+        const menuItem = this.clipItemsRadioGroup.find(item => item.entry === entry);
+        if (MOVE_ITEM_FIRST && menuItem && !entry.isFavorite() &&
+            menuItem !== this.clipItemsRadioGroup.at(-1))
+            this._moveItemFirst(menuItem);
     }
 
     // Asks the owner only for formats it offers, best first; a format that
