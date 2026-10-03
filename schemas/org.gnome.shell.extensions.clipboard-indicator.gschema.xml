@@ -238,13 +238,6 @@
             </description>
             <range min="1"/>
         </key>
-        <key name="next-history-clear" type="i">
-            <default>-1</default>
-            <summary>Next scheduled history clear time</summary>
-            <description>
-                The timestamp for the next scheduled history clear.
-            </description>
-        </key>
         <key name="case-sensitive-search" type="b">
             <default>false</default>
             <summary>Case sensitive search</summary>

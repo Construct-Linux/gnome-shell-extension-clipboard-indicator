@@ -75,7 +75,6 @@ let CACHE_IMAGES              = true;
 let EXCLUDED_APPS             = [];
 let CLEAR_HISTORY_ON_INTERVAL = false;
 let CLEAR_HISTORY_INTERVAL    = 60;
-let NEXT_HISTORY_CLEAR        = -1;
 let CASE_SENSITIVE_SEARCH     = false;
 let REGEX_SEARCH              = false;
 let OPEN_AT_CURSOR            = false;
@@ -150,6 +149,7 @@ const ClipboardIndicator = GObject.registerClass({
         this.keyboard = new Keyboard();
         this._selectionOwnerChangedId = null;
         this._buttonText = null;
+        this._nextHistoryClear = -1;
 
         this._shortcutsBindingIds = [];
         this.clipItemsRadioGroup = [];
@@ -1121,100 +1121,66 @@ const ClipboardIndicator = GObject.registerClass({
         });
     }
 
-    _setupHistoryIntervalClearing() {
-        if (this._intervalSettingChangedId) {
-            this.extension.settings.disconnect(this._intervalSettingChangedId);
-            this._intervalSettingChangedId = null;
-        }
-        if (this._intervalToggleChangedId) {
-            this.extension.settings.disconnect(this._intervalToggleChangedId);
-            this._intervalToggleChangedId = null;
-        }
-        if (this._historyClearTimeoutId) {
-            clearTimeout(this._historyClearTimeoutId);
-            this._historyClearTimeoutId = null;
-        }
-
-        this._intervalSettingChangedId = this.extension.settings.connect(
-            `changed::${PrefsFields.CLEAR_HISTORY_INTERVAL}`,
-            this._onHistoryIntervalClearSettingsChanged.bind(this)
-        );
-        this._intervalToggleChangedId = this.extension.settings.connect(
-            `changed::${PrefsFields.CLEAR_HISTORY_ON_INTERVAL}`,
-            this._onHistoryIntervalClearSettingsChanged.bind(this)
-        );
-
-        if (!CLEAR_HISTORY_ON_INTERVAL) {
-            this._updateIntervalTimer();
+    // The next clear time is state, not a preference: it lives in the cache
+    // directory, so neither enabling (every unlock) nor the timer writes
+    // dconf.
+    async _setupHistoryIntervalClearing () {
+        this._nextHistoryClear = await this.registry.readNextHistoryClear();
+        if (this._destroyed)
             return;
-        }
 
-        const currentTime = Math.ceil(new Date().getTime() / 1000);
+        this.extension.settings.connectObject(
+            `changed::${PrefsFields.CLEAR_HISTORY_INTERVAL}`, () => this._scheduleNextHistoryClear(),
+            `changed::${PrefsFields.CLEAR_HISTORY_ON_INTERVAL}`, () => this._scheduleNextHistoryClear(),
+            this);
 
-        if (NEXT_HISTORY_CLEAR === -1) { //new timer
+        if (!CLEAR_HISTORY_ON_INTERVAL)
+            this._resetHistoryClearTimer();
+        else if (this._nextHistoryClear === -1)
             this._scheduleNextHistoryClear();
-        }
-        else if (NEXT_HISTORY_CLEAR < currentTime) { //timer expired
+        else if (this._nextHistoryClear <= this.#now()) {
             this._clearHistory(true);
             this._scheduleNextHistoryClear();
         }
-        else { //timer already set, but not expired
-            const timeoutMs = (NEXT_HISTORY_CLEAR - currentTime) * 1000;
-            this._historyClearTimeoutId = setTimeout(() => {
-                this._clearHistory(true);
-                this._scheduleNextHistoryClear();
-            }, timeoutMs);
+        else {
+            this.#armHistoryClear();
             this._updateIntervalTimer();
         }
     }
 
-    _onHistoryIntervalClearSettingsChanged(_settings, key) {
-        if (key === PrefsFields.CLEAR_HISTORY_INTERVAL) {
-            this._scheduleNextHistoryClear();
-        }
-        else if (key === PrefsFields.CLEAR_HISTORY_ON_INTERVAL) {
-            if (CLEAR_HISTORY_ON_INTERVAL) {
-                this._resetHistoryClearTimer();
-                this._setupHistoryIntervalClearing();
-            } else {
-                this._resetHistoryClearTimer();
-            }
-        }
+    #now () {
+        return Math.ceil(Date.now() / 1000);
     }
 
-    _scheduleNextHistoryClear() {
-        if (this._historyClearTimeoutId) {
-            clearTimeout(this._historyClearTimeoutId);
+    #armHistoryClear () {
+        clearTimeout(this._historyClearTimeoutId);
+        this._historyClearTimeoutId = setTimeout(() => {
             this._historyClearTimeoutId = null;
-        }
+            this._clearHistory(true);
+            this._scheduleNextHistoryClear();
+        }, (this._nextHistoryClear - this.#now()) * 1000);
+    }
 
-        if(!CLEAR_HISTORY_ON_INTERVAL) {
+    _scheduleNextHistoryClear () {
+        if (!CLEAR_HISTORY_ON_INTERVAL) {
             this._resetHistoryClearTimer();
             return;
         }
 
-        const currentTime = Math.ceil(new Date().getTime() / 1000);
-        NEXT_HISTORY_CLEAR = currentTime + CLEAR_HISTORY_INTERVAL * 60;
-        const timeoutMs = (NEXT_HISTORY_CLEAR - currentTime) * 1000;
-
-        this.extension.settings.set_int(PrefsFields.NEXT_HISTORY_CLEAR, NEXT_HISTORY_CLEAR);
-
+        this._nextHistoryClear = this.#now() + CLEAR_HISTORY_INTERVAL * 60;
+        this.registry.writeNextHistoryClear(this._nextHistoryClear);
+        this.#armHistoryClear();
         this._updateIntervalTimer();
-
-        this._historyClearTimeoutId = setTimeout(() => {
-            this._clearHistory(true);
-            this._scheduleNextHistoryClear();
-        }, timeoutMs);
     }
 
-    _resetHistoryClearTimer() {
-        //basically just reset and stop the timer
-        if (this._historyClearTimeoutId) {
-            clearTimeout(this._historyClearTimeoutId);
-            this._historyClearTimeoutId = null;
+    _resetHistoryClearTimer () {
+        clearTimeout(this._historyClearTimeoutId);
+        this._historyClearTimeoutId = null;
+        if (this._nextHistoryClear !== -1) {
+            this._nextHistoryClear = -1;
+            this.registry.writeNextHistoryClear(-1);
         }
         this._updateIntervalTimer();
-        this.extension.settings.set_int(PrefsFields.NEXT_HISTORY_CLEAR, -1);
     }
 
     _updateIntervalTimer() {
@@ -1223,7 +1189,7 @@ const ClipboardIndicator = GObject.registerClass({
         if (!CLEAR_HISTORY_ON_INTERVAL) return;
 
         let currentTime = Math.ceil(new Date().getTime() / 1000);
-        let timeLeft = NEXT_HISTORY_CLEAR - currentTime;
+        let timeLeft = this._nextHistoryClear - currentTime;
 
         if (timeLeft <= 0) {
             this.timerLabel.set_text('');
@@ -1397,7 +1363,6 @@ const ClipboardIndicator = GObject.registerClass({
         EXCLUDED_APPS               = settings.get_strv(PrefsFields.EXCLUDED_APPS);
         CLEAR_HISTORY_ON_INTERVAL   = settings.get_boolean(PrefsFields.CLEAR_HISTORY_ON_INTERVAL);
         CLEAR_HISTORY_INTERVAL      = settings.get_int(PrefsFields.CLEAR_HISTORY_INTERVAL);
-        NEXT_HISTORY_CLEAR          = settings.get_int(PrefsFields.NEXT_HISTORY_CLEAR);
         CASE_SENSITIVE_SEARCH       = settings.get_boolean(PrefsFields.CASE_SENSITIVE_SEARCH);
         REGEX_SEARCH                = settings.get_boolean(PrefsFields.REGEX_SEARCH);
         OPEN_AT_CURSOR              = settings.get_boolean(PrefsFields.OPEN_AT_CURSOR);
@@ -1525,16 +1490,6 @@ const ClipboardIndicator = GObject.registerClass({
 
     _disconnectSettings () {
         this.extension.settings.disconnectObject(this);
-
-        if (this._intervalSettingChangedId) {
-            this.extension.settings.disconnect(this._intervalSettingChangedId);
-            this._intervalSettingChangedId = null;
-        }
-
-        if (this._intervalToggleChangedId) {
-            this.extension.settings.disconnect(this._intervalToggleChangedId);
-            this._intervalToggleChangedId = null;
-        }
 
         if (this._historyClearTimeoutId) {
             clearTimeout(this._historyClearTimeoutId);

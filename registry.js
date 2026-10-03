@@ -15,6 +15,7 @@ const FileTest = GLib.FileTest;
 
 export class Registry {
     #pendingEntries = null;
+    #nextClearWrite = Promise.resolve();
     #writeIdleId = 0;
     #writing = false;
     #dirReady = false;
@@ -27,6 +28,7 @@ export class Registry {
         this.REGISTRY_PATH = this.REGISTRY_DIR + '/' + this.REGISTRY_FILE;
         this.BACKUP_REGISTRY_PATH = this.REGISTRY_PATH + '~';
         this.BOOT_ID_PATH = this.REGISTRY_DIR + '/boot-id';
+        this.NEXT_HISTORY_CLEAR_PATH = this.REGISTRY_DIR + '/next-history-clear';
     }
 
     // The shell disables the extension on every screen lock and enables it
@@ -58,6 +60,30 @@ export class Registry {
         this.#ensureDir();
         await file.replace_contents_bytes_async(new GLib.Bytes(bootId),
             null, false, Gio.FileCreateFlags.NONE, null);
+    }
+
+    // seconds since the epoch, -1 when no clear is scheduled
+    async readNextHistoryClear () {
+        try {
+            const file = Gio.file_new_for_path(this.NEXT_HISTORY_CLEAR_PATH);
+            const [contents] = await file.load_contents_async(null);
+            const time = Number(new TextDecoder().decode(contents).trim());
+            return Number.isInteger(time) ? time : -1;
+        }
+        catch (e) {
+            if (!e.matches(Gio.IOErrorEnum, Gio.IOErrorEnum.NOT_FOUND))
+                console.error(e);
+            return -1;
+        }
+    }
+
+    // chained, so the last value written is the last one asked for
+    writeNextHistoryClear (time) {
+        this.#nextClearWrite = this.#nextClearWrite.then(async () => {
+            this.#ensureDir();
+            await Gio.file_new_for_path(this.NEXT_HISTORY_CLEAR_PATH).replace_contents_bytes_async(
+                new GLib.Bytes(`${time}`), null, false, Gio.FileCreateFlags.NONE, null);
+        }).catch(e => console.error(e));
     }
 
     // Every change writes the whole history, several times for one copy
