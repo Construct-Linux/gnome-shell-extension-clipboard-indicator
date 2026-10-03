@@ -1254,17 +1254,19 @@ const ClipboardIndicator = GObject.registerClass({
     }
 
     _showNotification (message, transformFn) {
-        const dndOn = () =>
-            !Main.panel.statusArea.dateMenu._indicator._settings.get_boolean(
-                'show-banners',
-            );
-        if (PRIVATEMODE || dndOn()) {
+        if (PRIVATEMODE)
             return;
-        }
-
-        let notification = null;
 
         this._initNotifSource();
+
+        // Under Do Not Disturb the tray would list the notification instead
+        // of showing a banner (messageTray.js:938), and a cycle notification
+        // carries the entry's text: it would stay in the list. Skip it, as
+        // the source's own policy reports (messageTray.js:236).
+        if (!this._notifSource.policy.showBanners)
+            return;
+
+        let notification = null;
 
         if (this._notifSource.count === 0) {
             notification = new MessageTray.Notification({
