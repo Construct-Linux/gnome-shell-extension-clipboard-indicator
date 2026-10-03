@@ -1014,7 +1014,14 @@ const ClipboardIndicator = GObject.registerClass({
     }
 
     async _getCache () {
-        await this.registry.recordBoot(CLEAR_ON_BOOT);
+        // a failed boot-id write must not leave the indicator without a menu
+        try {
+            await this.registry.recordBoot(CLEAR_ON_BOOT);
+        }
+        catch (e) {
+            console.error('Clipboard Indicator: failed to record the boot id');
+            console.error(e);
+        }
         return this.registry.read();
     }
 
