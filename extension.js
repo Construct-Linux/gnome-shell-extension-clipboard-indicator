@@ -156,8 +156,6 @@ const ClipboardIndicator = GObject.registerClass({
         // it is: in icon-only mode the label must never show
         this._updateTopbarLayout();
 
-        if (CLEAR_ON_BOOT) this.registry.clearCacheFolder();
-
         this.dialogManager = new DialogManager();
         this._buildMenu().then(() => {
             if (this._destroyed) {
@@ -973,7 +971,8 @@ const ClipboardIndicator = GObject.registerClass({
         menuItem.menu.close();
     }
 
-    _getCache () {
+    async _getCache () {
+        await this.registry.recordBoot(CLEAR_ON_BOOT);
         return this.registry.read();
     }
 

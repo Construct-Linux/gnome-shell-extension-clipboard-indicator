@@ -3,6 +3,12 @@ import Gio from 'gi://Gio';
 import St from 'gi://St';
 import { PrefsFields } from './constants.js';
 
+Gio._promisify(Gio.File.prototype, 'load_contents_async');
+Gio._promisify(Gio.File.prototype, 'replace_contents_bytes_async', 'replace_contents_finish');
+Gio._promisify(Gio.File.prototype, 'enumerate_children_async');
+Gio._promisify(Gio.File.prototype, 'delete_async');
+Gio._promisify(Gio.FileEnumerator.prototype, 'next_files_async');
+
 const FileQueryInfoFlags = Gio.FileQueryInfoFlags;
 const FileCopyFlags = Gio.FileCopyFlags;
 const FileTest = GLib.FileTest;
@@ -15,6 +21,38 @@ export class Registry {
         this.REGISTRY_DIR = GLib.get_user_cache_dir() + '/' + this.uuid;
         this.REGISTRY_PATH = this.REGISTRY_DIR + '/' + this.REGISTRY_FILE;
         this.BACKUP_REGISTRY_PATH = this.REGISTRY_PATH + '~';
+        this.BOOT_ID_PATH = this.REGISTRY_DIR + '/boot-id';
+    }
+
+    // The shell disables the extension on every screen lock and enables it
+    // again on unlock, so a new boot is told by the kernel's boot id, kept
+    // next to the history, not by enable(). With no id stored yet nothing is
+    // cleared: turning the option on must not wipe the history at the next
+    // unlock.
+    async recordBoot (clearIfNew) {
+        const [, current] = GLib.file_get_contents('/proc/sys/kernel/random/boot_id');
+        const bootId = new TextDecoder().decode(current).trim();
+        const file = Gio.file_new_for_path(this.BOOT_ID_PATH);
+
+        let stored = null;
+        try {
+            const [contents] = await file.load_contents_async(null);
+            stored = new TextDecoder().decode(contents).trim();
+        }
+        catch (e) {
+            if (!e.matches(Gio.IOErrorEnum, Gio.IOErrorEnum.NOT_FOUND))
+                console.error(e);
+        }
+
+        if (stored === bootId)
+            return;
+
+        if (clearIfNew && stored !== null)
+            await this.clearCacheFolder();
+
+        GLib.mkdir_with_parents(this.REGISTRY_DIR, 0o775);
+        await file.replace_contents_bytes_async(new GLib.Bytes(bootId),
+            null, false, Gio.FileCreateFlags.NONE, null);
     }
 
     write (entries) {
@@ -214,21 +252,21 @@ export class Registry {
         }
     }
 
-    clearCacheFolder() {
-
-        const CANCELLABLE = null;
+    async clearCacheFolder () {
+        const folder = Gio.file_new_for_path(this.REGISTRY_DIR);
         try {
-            const folder = Gio.file_new_for_path(this.REGISTRY_DIR);
-            const enumerator = folder.enumerate_children("", 1, CANCELLABLE);
-
-            let file;
-            while ((file = enumerator.iterate(CANCELLABLE)[2]) != null) {
-                file.delete(CANCELLABLE);
+            const enumerator = await folder.enumerate_children_async(
+                Gio.FILE_ATTRIBUTE_STANDARD_NAME, FileQueryInfoFlags.NOFOLLOW_SYMLINKS,
+                GLib.PRIORITY_DEFAULT, null);
+            let infos;
+            while ((infos = await enumerator.next_files_async(64, GLib.PRIORITY_DEFAULT, null)).length) {
+                await Promise.all(infos.map(info =>
+                    enumerator.get_child(info).delete_async(GLib.PRIORITY_DEFAULT, null)));
             }
-
         }
         catch (e) {
-            console.error(e);
+            if (!e.matches(Gio.IOErrorEnum, Gio.IOErrorEnum.NOT_FOUND))
+                console.error(e);
         }
     }
 }
