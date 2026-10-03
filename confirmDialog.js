@@ -54,7 +54,7 @@ const ConfirmDialog = GObject.registerClass(
             this.close();
             this.onFinish();
           },
-          key: Clutter.Escape
+          key: Clutter.KEY_Escape
         },
         {
           label: ok_label,
