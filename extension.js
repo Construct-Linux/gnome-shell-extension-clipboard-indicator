@@ -1454,7 +1454,8 @@ const ClipboardIndicator = GObject.registerClass({
             name,
             this.extension.settings,
             Meta.KeyBindingFlags.NONE,
-            Shell.ActionMode.ALL,
+            // never on the lock, unlock or login screens, nor in modal dialogs
+            Shell.ActionMode.NORMAL | Shell.ActionMode.OVERVIEW | Shell.ActionMode.POPUP,
             cb.bind(this)
         );
 
