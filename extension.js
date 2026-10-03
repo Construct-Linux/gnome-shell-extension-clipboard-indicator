@@ -97,6 +97,7 @@ const ClipboardIndicator = GObject.registerClass({
         this._destroyNotifSource();
         this.dialogManager.destroy();
         this.keyboard.destroy();
+        this.registry.destroy();
         this._cursorActor.destroy();
         this._cursorActor = null;
 
@@ -977,14 +978,6 @@ const ClipboardIndicator = GObject.registerClass({
         return this.registry.read();
     }
 
-    #addToCache (entry) {
-        const entries = this.clipItemsRadioGroup
-            .map(menuItem => menuItem.entry)
-            .filter(entry => CACHE_ONLY_FAVORITE == false || entry.isFavorite())
-            .concat([entry]);
-        this.registry.write(entries);
-    }
-
     _updateCache () {
         const entries = this.clipItemsRadioGroup
             .map(menuItem => menuItem.entry)
@@ -1034,8 +1027,8 @@ const ClipboardIndicator = GObject.registerClass({
                 if (this._destroyed)
                     return;
 
-                this.#addToCache(result);
                 this._addEntry(result, true, false);
+                this._updateCache();
                 this._removeOldestEntries();
                 if (NOTIFY_ON_COPY) {
                     this._showNotification(_("Copied to clipboard"), notif => {

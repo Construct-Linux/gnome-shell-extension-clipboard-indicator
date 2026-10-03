@@ -14,6 +14,11 @@ const FileCopyFlags = Gio.FileCopyFlags;
 const FileTest = GLib.FileTest;
 
 export class Registry {
+    #pendingEntries = null;
+    #writeIdleId = 0;
+    #writing = false;
+    #dirReady = false;
+
     constructor ({ settings, uuid }) {
         this.uuid = uuid;
         this.settings = settings;
@@ -50,21 +55,53 @@ export class Registry {
         if (clearIfNew && stored !== null)
             await this.clearCacheFolder();
 
-        GLib.mkdir_with_parents(this.REGISTRY_DIR, 0o775);
+        this.#ensureDir();
         await file.replace_contents_bytes_async(new GLib.Bytes(bootId),
             null, false, Gio.FileCreateFlags.NONE, null);
     }
 
+    // Every change writes the whole history, several times for one copy
+    // (add, evict, move to top). The file is written once the main loop is
+    // idle, from the latest list, and one write never overlaps another.
     write (entries) {
-        const registryContent = [];
+        this.#pendingEntries = entries;
+        this.#writeIdleId ||= GLib.idle_add(GLib.PRIORITY_LOW, () => {
+            this.#writeIdleId = 0;
+            this.#flush();
+            return GLib.SOURCE_REMOVE;
+        });
+    }
 
-        for (let entry of entries) {
+    async #flush () {
+        if (this.#writing || !this.#pendingEntries)
+            return;
+
+        const contents = new GLib.Bytes(JSON.stringify(this.#serialize(this.#pendingEntries)));
+        this.#pendingEntries = null;
+        this.#writing = true;
+        try {
+            this.#ensureDir();
+            await Gio.file_new_for_path(this.REGISTRY_PATH).replace_contents_bytes_async(
+                contents, null, false, Gio.FileCreateFlags.NONE, null);
+        }
+        catch (e) {
+            console.error('Clipboard Indicator: failed to write the registry');
+            console.error(e);
+        }
+        finally {
+            this.#writing = false;
+        }
+
+        // changes made while the file was being written
+        this.#flush();
+    }
+
+    #serialize (entries) {
+        return entries.map(entry => {
             const item = {
                 favorite: entry.isFavorite(),
                 mimetype: entry.mimetype()
             };
-
-            registryContent.push(item);
 
             if (entry.isText()) {
                 item.contents = entry.getStringValue();
@@ -74,32 +111,25 @@ export class Registry {
             }
 
             if (entry.getTag()) item.tag = entry.getTag();
-        }
-
-        this.writeToFile(registryContent);
+            return item;
+        });
     }
 
-    writeToFile (registry) {
-        let json = JSON.stringify(registry);
-        let contents = new GLib.Bytes(json);
+    #ensureDir () {
+        if (this.#dirReady)
+            return;
+        GLib.mkdir_with_parents(this.REGISTRY_DIR, 0o775);
+        this.#dirReady = true;
+    }
 
-        // Make sure dir exists
-        GLib.mkdir_with_parents(this.REGISTRY_DIR, parseInt('0775', 8));
-
-        // Write contents to file asynchronously
-        let file = Gio.file_new_for_path(this.REGISTRY_PATH);
-        file.replace_async(null, false, Gio.FileCreateFlags.NONE,
-                            GLib.PRIORITY_DEFAULT, null, (obj, res) => {
-
-            let stream = obj.replace_finish(res);
-
-            stream.write_bytes_async(contents, GLib.PRIORITY_DEFAULT,
-                                null, (w_obj, w_res) => {
-
-                w_obj.write_bytes_finish(w_res);
-                stream.close(null);
-            });
-        });
+    // a pending write is started now rather than dropped; it finishes on
+    // its own after the extension is disabled
+    destroy () {
+        if (this.#writeIdleId) {
+            GLib.source_remove(this.#writeIdleId);
+            this.#writeIdleId = 0;
+        }
+        this.#flush();
     }
 
     async read () {
@@ -201,7 +231,7 @@ export class Registry {
     async writeEntryFile (entry) {
         const file = Gio.file_new_for_path(this.getEntryFilename(entry));
 
-        GLib.mkdir_with_parents(this.REGISTRY_DIR, 0o775);
+        this.#ensureDir();
         await file.replace_contents_bytes_async(entry.asBytes(),
             null, false, Gio.FileCreateFlags.NONE, null);
         entry.releaseBytes();
