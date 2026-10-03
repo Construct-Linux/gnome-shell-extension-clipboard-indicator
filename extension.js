@@ -1079,7 +1079,7 @@ const ClipboardIndicator = GObject.registerClass({
                 this._removeOldestEntries();
                 if (NOTIFY_ON_COPY) {
                     this._showNotification(_("Copied to clipboard"), notif => {
-                        notif.addAction(_('Cancel'), this._cancelNotification);
+                        notif.addAction(_('Cancel'), () => this._cancelNotification());
                     });
                 }
                 this._blinkIcon();
