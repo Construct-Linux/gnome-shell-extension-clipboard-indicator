@@ -22,6 +22,14 @@ const CLIPBOARD_TYPE = St.ClipboardType.CLIPBOARD;
 
 const INDICATOR_ICON = 'edit-paste-symbolic';
 
+// Password managers mark a copied secret with one of these formats (KDE's
+// hint, read by Klipper; the concealed type from macOS, which KeePassXC also
+// sets). A copy offering either is never read, stored or written to disk.
+const SECRET_HINT_MIMETYPES = [
+    'x-kde-passwordManagerHint',
+    'application/x-nspasteboard-concealed-type',
+];
+
 // the formats recorded, in order of preference
 const MIMETYPES = [
     'text/plain;charset=utf-8',
@@ -1927,6 +1935,8 @@ const ClipboardIndicator = GObject.registerClass({
     // comes back empty falls through to the next one.
     async #getClipboardContent () {
         const offered = this.extension.clipboard.get_mimetypes(CLIPBOARD_TYPE);
+        if (offered.some(t => SECRET_HINT_MIMETYPES.includes(t)))
+            return null;
 
         for (const type of MIMETYPES.filter(t => offered.includes(t))) {
             const bytes = await new Promise(resolve =>
