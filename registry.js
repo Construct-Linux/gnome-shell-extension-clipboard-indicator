@@ -238,10 +238,6 @@ export class ClipboardEntry {
     #bytes;
     #favorite;
 
-    static #decode (contents) {
-        return Uint8Array.from(contents.match(/.{1,2}/g).map((byte) => parseInt(byte, 16)));
-    }
-
     static __isText (mimetype) {
         return mimetype.startsWith('text/') ||
             mimetype === 'STRING' ||
@@ -262,32 +258,18 @@ export class ClipboardEntry {
 
             let file = Gio.file_new_for_path(filename);
 
-            const contentType = await file.query_info_async('*', FileQueryInfoFlags.NONE, GLib.PRIORITY_DEFAULT, null, (obj, res) => {
-                try {
-                    const fileInfo = obj.query_info_finish(res);
-                    return fileInfo.get_content_type();
-                } catch (e) {
-                    console.error(e);
+            bytes = await new Promise((resolve, reject) => file.load_contents_async(null, (obj, res) => {
+                let [success, contents] = obj.load_contents_finish(res);
+
+                if (success) {
+                    resolve(contents);
                 }
-            });
-
-            if (contentType && !contentType.startsWith('image/') && !contentType.startsWith('text/')) {
-                bytes = new TextEncoder().encode(jsonEntry.contents);
-            }
-            else {
-                bytes = await new Promise((resolve, reject) => file.load_contents_async(null, (obj, res) => {
-                    let [success, contents] = obj.load_contents_finish(res);
-
-                    if (success) {
-                        resolve(contents);
-                    }
-                    else {
-                        reject(
-                            new Error('Clipboard Indicator: could not read image file from cache')
-                        );
-                    }
-                }));
-            }
+                else {
+                    reject(
+                        new Error('Clipboard Indicator: could not read image file from cache')
+                    );
+                }
+            }));
         }
 
         const entry = new ClipboardEntry(mimetype, bytes, favorite);
@@ -299,16 +281,6 @@ export class ClipboardEntry {
         this.#mimetype = mimetype;
         this.#bytes = bytes;
         this.#favorite = favorite;
-    }
-
-    #encode () {
-        if (this.isText()) {
-            return this.getStringValue();
-        }
-
-        return [...this.#bytes]
-            .map(x => x.toString(16).padStart(2, '0'))
-            .join('');
     }
 
     getStringValue () {
@@ -359,6 +331,5 @@ export class ClipboardEntry {
 
     equals (otherEntry) {
         return this.getStringValue() === otherEntry.getStringValue();
-        // this.asBytes().equal(otherEntry.asBytes());
     }
 }
