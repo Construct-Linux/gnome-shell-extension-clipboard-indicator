@@ -1241,11 +1241,7 @@ const ClipboardIndicator = GObject.registerClass({
     _cancelNotification () {
         if (this.clipItemsRadioGroup.length >= 2) {
             let clipSecond = this.clipItemsRadioGroup.length - 2;
-            let previousClip = this.clipItemsRadioGroup[clipSecond];
-            this.#updateClipboard(previousClip.entry);
-            previousClip.setOrnament(PopupMenu.Ornament.DOT);
-            previousClip.icoBtn.visible = false;
-            previousClip.currentlySelected = true;
+            this._selectMenuItem(this.clipItemsRadioGroup[clipSecond]);
         } else {
             this.#clearClipboard();
         }
