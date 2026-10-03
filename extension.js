@@ -894,7 +894,8 @@ const ClipboardIndicator = GObject.registerClass({
         menuItem.destroy();
         this.clipItemsRadioGroup.splice(itemIdx,1);
 
-        if (menuItem.entry.isImage()) {
+        // a moved entry is added back at once and still needs its image
+        if (menuItem.entry.isImage() && event !== 'move') {
             this.registry.deleteEntryFile(menuItem.entry);
         }
 
@@ -1028,6 +1029,11 @@ const ClipboardIndicator = GObject.registerClass({
                     }
                 }
 
+                if (result.isImage())
+                    await this.registry.writeEntryFile(result);
+                if (this._destroyed)
+                    return;
+
                 this.#addToCache(result);
                 this._addEntry(result, true, false);
                 this._removeOldestEntries();
@@ -1049,7 +1055,7 @@ const ClipboardIndicator = GObject.registerClass({
     }
 
     _moveItemFirst (item) {
-        this._removeEntry(item);
+        this._removeEntry(item, 'move');
         this._addEntry(item.entry, item.currentlySelected, false);
         this._updateCache();
     }
@@ -1593,10 +1599,12 @@ const ClipboardIndicator = GObject.registerClass({
 
 
 
-    #pasteItem (menuItem) {
+    async #pasteItem (menuItem) {
         this.menu.close();
         this.preventIndicatorUpdate = true;
-        this.#updateClipboard(menuItem.entry);
+        await this.#updateClipboard(menuItem.entry);
+        if (this._destroyed)
+            return;
         this._pastingKeypressTimeout = setTimeout(() => {
             if (this.keyboard.purpose === Clutter.InputContentPurpose.TERMINAL) {
                 this.keyboard.press(Clutter.KEY_Control_L);
@@ -1876,8 +1884,20 @@ const ClipboardIndicator = GObject.registerClass({
         this.#updateIndicatorContent(null);
     }
 
-    #updateClipboard (entry) {
-        this.extension.clipboard.set_content(CLIPBOARD_TYPE, entry.mimetype(), entry.asBytes());
+    async #updateClipboard (entry) {
+        let bytes;
+        try {
+            bytes = await this.registry.getEntryBytes(entry);
+        }
+        catch (e) {
+            console.error('Clipboard Indicator: could not read the cached image');
+            console.error(e);
+            return;
+        }
+        if (this._destroyed)
+            return;
+
+        this.extension.clipboard.set_content(CLIPBOARD_TYPE, entry.mimetype(), bytes);
         this.#updateIndicatorContent(entry);
     }
 
@@ -1909,11 +1929,7 @@ const ClipboardIndicator = GObject.registerClass({
                     type = "text/plain;charset=utf-8";
                 }
 
-                const entry = new ClipboardEntry(type, bytes, false);
-                if (CACHE_IMAGES && entry.isImage()) {
-                    this.registry.writeEntryFile(entry);
-                }
-                resolve(entry);
+                resolve(new ClipboardEntry(type, bytes, false));
             }));
 
             if (result) {

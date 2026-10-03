@@ -70,9 +70,7 @@ export class Registry {
                 item.contents = entry.getStringValue();
             }
             else if (entry.isImage()) {
-                const filename = this.getEntryFilename(entry);
-                item.contents = filename;
-                this.writeEntryFile(entry);
+                item.contents = entry.hash();
             }
 
             if (entry.getTag()) item.tag = entry.getTag();
@@ -145,34 +143,25 @@ export class Registry {
                                     return;
                                 }
                             }
-                            const entriesPromises = registry.map(
-                                jsonEntry => {
-                                    return ClipboardEntry.fromJSON(jsonEntry)
-                                }
-                            );
+                            let clipboardEntries = registry
+                                .map(jsonEntry => ClipboardEntry.fromJSON(jsonEntry, this.REGISTRY_DIR))
+                                .filter(entry => entry !== null)
+                                .filter(entry => !oversize || entry.isFavorite());
 
-                            Promise.all(entriesPromises).then(clipboardEntries => {
-                                clipboardEntries = clipboardEntries
-                                    .filter(entry => entry !== null)
-                                    .filter(entry => !oversize || entry.isFavorite());
+                            let registryNoFavorite = clipboardEntries
+                                .filter(entry => !entry.isFavorite());
 
-                                let registryNoFavorite = clipboardEntries
-                                    .filter(entry => !entry.isFavorite());
+                            while (registryNoFavorite.length > max_size) {
+                                let oldestNoFavorite = registryNoFavorite.shift();
+                                let itemIdx = clipboardEntries.indexOf(oldestNoFavorite);
+                                clipboardEntries.splice(itemIdx,1);
 
-                                while (registryNoFavorite.length > max_size) {
-                                    let oldestNoFavorite = registryNoFavorite.shift();
-                                    let itemIdx = clipboardEntries.indexOf(oldestNoFavorite);
-                                    clipboardEntries.splice(itemIdx,1);
+                                registryNoFavorite = clipboardEntries.filter(
+                                    entry => !entry.isFavorite()
+                                );
+                            }
 
-                                    registryNoFavorite = clipboardEntries.filter(
-                                        entry => !entry.isFavorite()
-                                    );
-                                }
-
-                                resolve(clipboardEntries);
-                            }).catch(e => {
-                                console.error(e);
-                            });
+                            resolve(clipboardEntries);
                         }
                         else {
                             console.error('Clipboard Indicator: failed to open registry file');
@@ -186,17 +175,8 @@ export class Registry {
         });
     }
 
-    #entryFileExists (entry) {
-        const filename = this.getEntryFilename(entry);
-        return GLib.file_test(filename, FileTest.EXISTS);
-    }
-
     async getEntryAsImage (entry) {
         if (entry.isImage() === false) return;
-
-        if (this.#entryFileExists(entry) == false) {
-            await this.writeEntryFile(entry);
-        }
 
         const gicon = Gio.icon_new_for_string(this.getEntryFilename(entry));
         const stIcon = new St.Icon({ gicon });
@@ -205,10 +185,6 @@ export class Registry {
 
     async getEntryAsTexture (entry) {
         if (entry.isImage() === false) return null;
-
-        if (this.#entryFileExists(entry) === false) {
-            await this.writeEntryFile(entry);
-        }
 
         const file = Gio.file_new_for_path(this.getEntryFilename(entry));
         const scaleFactor = St.ThemeContext.get_for_stage(global.stage).scale_factor;
@@ -219,26 +195,25 @@ export class Registry {
         return `${this.REGISTRY_DIR}/${entry.hash()}`;
     }
 
+    // Images live in the cache directory, named by their hash, from the
+    // moment they are copied; the entry then lets go of its bytes and
+    // getEntryBytes reads them back when the image is put on the clipboard.
     async writeEntryFile (entry) {
-        if (this.#entryFileExists(entry)) return;
+        const file = Gio.file_new_for_path(this.getEntryFilename(entry));
 
-        let file = Gio.file_new_for_path(this.getEntryFilename(entry));
+        GLib.mkdir_with_parents(this.REGISTRY_DIR, 0o775);
+        await file.replace_contents_bytes_async(entry.asBytes(),
+            null, false, Gio.FileCreateFlags.NONE, null);
+        entry.releaseBytes();
+    }
 
-        return new Promise(resolve => {
-            file.replace_async(null, false, Gio.FileCreateFlags.NONE,
-                               GLib.PRIORITY_DEFAULT, null, (obj, res) => {
+    async getEntryBytes (entry) {
+        if (entry.asBytes())
+            return entry.asBytes();
 
-                let stream = obj.replace_finish(res);
-
-                stream.write_bytes_async(entry.asBytes(), GLib.PRIORITY_DEFAULT,
-                                         null, (w_obj, w_res) => {
-
-                    w_obj.write_bytes_finish(w_res);
-                    stream.close(null);
-                    resolve();
-                });
-            });
-        });
+        const file = Gio.file_new_for_path(this.getEntryFilename(entry));
+        const [contents] = await file.load_contents_async(null);
+        return new GLib.Bytes(contents);
     }
 
     async deleteEntryFile (entry) {
@@ -284,7 +259,7 @@ export class ClipboardEntry {
             mimetype === 'UTF8_STRING';
     }
 
-    static async fromJSON (jsonEntry) {
+    static fromJSON (jsonEntry, registryDir) {
         const mimetype = jsonEntry.mimetype || 'text/plain;charset=utf-8';
         const favorite = jsonEntry.favorite;
         let entry;
@@ -293,24 +268,15 @@ export class ClipboardEntry {
             entry = ClipboardEntry.fromText(mimetype, jsonEntry.contents, favorite);
         }
         else {
-            const filename = jsonEntry.contents;
-            if (!GLib.file_test(filename, FileTest.EXISTS)) return null;
+            // a hash names a file in the cache directory; anything else in
+            // the registry is not one of ours to open
+            const hash = jsonEntry.contents;
+            if (!/^[0-9a-f]{64}$/.test(hash) ||
+                !GLib.file_test(`${registryDir}/${hash}`, FileTest.EXISTS))
+                return null;
 
-            let file = Gio.file_new_for_path(filename);
-
-            const bytes = await new Promise((resolve, reject) => file.load_contents_async(null, (obj, res) => {
-                let [success, contents] = obj.load_contents_finish(res);
-
-                if (success) {
-                    resolve(contents);
-                }
-                else {
-                    reject(
-                        new Error('Clipboard Indicator: could not read image file from cache')
-                    );
-                }
-            }));
-            entry = new ClipboardEntry(mimetype, new GLib.Bytes(bytes), favorite);
+            entry = new ClipboardEntry(mimetype, null, favorite);
+            entry.#hash = hash;
         }
 
         if (jsonEntry.tag) entry.setTag(jsonEntry.tag);
@@ -324,7 +290,8 @@ export class ClipboardEntry {
     }
 
     // bytes is the GLib.Bytes the clipboard handed over: it is kept as is and
-    // handed back to St.Clipboard.set_content, never copied
+    // handed back to St.Clipboard.set_content, never copied. A cached image
+    // has none in memory, only its hash.
     constructor (mimetype, bytes, favorite) {
         this.#mimetype = mimetype;
         this.#bytes = bytes;
@@ -347,7 +314,7 @@ export class ClipboardEntry {
     }
 
     size () {
-        return this.#bytes.get_size();
+        return this.#bytes?.get_size() ?? null;
     }
 
     mimetype () {
@@ -391,6 +358,11 @@ export class ClipboardEntry {
         return this.#bytes;
     }
 
+    releaseBytes () {
+        this.hash();
+        this.#bytes = null;
+    }
+
     // Text compares as text whatever text mimetype carried it; anything else
     // must match in mimetype, length and hash, cheapest first.
     equals (otherEntry) {
@@ -399,8 +371,9 @@ export class ClipboardEntry {
                 this.getStringValue() === otherEntry.getStringValue();
         }
 
+        const size = this.size(), otherSize = otherEntry.size();
         return this.#mimetype === otherEntry.mimetype() &&
-            this.size() === otherEntry.size() &&
+            (size === null || otherSize === null || size === otherSize) &&
             this.hash() === otherEntry.hash();
     }
 }
