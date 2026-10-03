@@ -22,6 +22,21 @@ const CLIPBOARD_TYPE = St.ClipboardType.CLIPBOARD;
 
 const INDICATOR_ICON = 'edit-paste-symbolic';
 
+// the formats recorded, in order of preference
+const MIMETYPES = [
+    'text/plain;charset=utf-8',
+    'UTF8_STRING',
+    'text/plain',
+    'STRING',
+    'image/gif',
+    'image/png',
+    'image/jpg',
+    'image/jpeg',
+    'image/webp',
+    'image/svg+xml',
+    'text/html',
+];
+
 // Text is kept in memory, rewritten into the registry on every change and
 // matched on every search keystroke; past this size a copy is not recorded.
 // Images live on disk (see Registry.writeEntryFile) and are not capped.
@@ -1908,45 +1923,22 @@ const ClipboardIndicator = GObject.registerClass({
         this.#updateIndicatorContent(entry);
     }
 
+    // Asks the owner only for formats it offers, best first; a format that
+    // comes back empty falls through to the next one.
     async #getClipboardContent () {
-        const mimetypes = [
-            "text/plain;charset=utf-8",
-            "UTF8_STRING",
-            "text/plain",
-            "STRING",
-            'image/gif',
-            'image/png',
-            'image/jpg',
-            'image/jpeg',
-            'image/webp',
-            'image/svg+xml',
-            'text/html',
-        ];
+        const offered = this.extension.clipboard.get_mimetypes(CLIPBOARD_TYPE);
 
-        for (let type of mimetypes) {
-            let result = await new Promise(resolve => this.extension.clipboard.get_content(CLIPBOARD_TYPE, type, (clipBoard, bytes) => {
-                if (bytes === null || bytes.get_size() === 0) {
-                    resolve(null);
-                    return;
-                }
+        for (const type of MIMETYPES.filter(t => offered.includes(t))) {
+            const bytes = await new Promise(resolve =>
+                this.extension.clipboard.get_content(CLIPBOARD_TYPE, type, (clipBoard, bytes) => resolve(bytes)));
+            if (bytes === null || bytes.get_size() === 0)
+                continue;
 
-                // HACK: workaround for GNOME 2nd+ copy mangling mimetypes https://gitlab.gnome.org/GNOME/gnome-shell/-/issues/8233
-                // In theory GNOME or XWayland should auto-convert this back to UTF8_STRING for legacy apps when it's needed https://gitlab.gnome.org/GNOME/gtk/-/merge_requests/5300
-                if (type === "UTF8_STRING") {
-                    type = "text/plain;charset=utf-8";
-                }
-
-                resolve(new ClipboardEntry(type, bytes, false));
-            }));
-
-            if (result) {
-                if (!CACHE_IMAGES && result.isImage()) {
-                    return null;
-                }
-                else {
-                    return result;
-                }
-            }
+            // HACK: workaround for GNOME 2nd+ copy mangling mimetypes https://gitlab.gnome.org/GNOME/gnome-shell/-/issues/8233
+            // In theory GNOME or XWayland should auto-convert this back to UTF8_STRING for legacy apps when it's needed https://gitlab.gnome.org/GNOME/gtk/-/merge_requests/5300
+            const mimetype = type === 'UTF8_STRING' ? 'text/plain;charset=utf-8' : type;
+            const entry = new ClipboardEntry(mimetype, bytes, false);
+            return !CACHE_IMAGES && entry.isImage() ? null : entry;
         }
 
         return null;
