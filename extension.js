@@ -148,7 +148,6 @@ const ClipboardIndicator = GObject.registerClass({
         this._destroyed = false;
         this.registry = new Registry(extension);
         this.keyboard = new Keyboard();
-        this._settingsChangedId = null;
         this._selectionOwnerChangedId = null;
         this._buttonText = null;
 
@@ -192,6 +191,7 @@ const ClipboardIndicator = GObject.registerClass({
                 return;
             }
             this._updateTopbarLayout();
+            this._connectMenuSettings();
             this._setupListener();
             this._setupHistoryIntervalClearing();
         }).catch(e => console.error('Clipboard Indicator: _buildMenu failed', e));
@@ -1370,8 +1370,16 @@ const ClipboardIndicator = GObject.registerClass({
     }
 
     _loadSettings () {
-        this._settingsChangedId = this.extension.settings.connect('changed',
-            this._onSettingsChange.bind(this));
+        const { settings } = this.extension;
+
+        // connected first, so the handlers for single keys see the new values
+        settings.connectObject('changed', () => this._fetchSettings(), this);
+        settings.connectObject(`changed::${PrefsFields.ENABLE_KEYBINDING}`, () => {
+            if (ENABLE_KEYBINDING)
+                this._bindShortcuts();
+            else
+                this._unbindShortcuts();
+        }, this);
 
         this._fetchSettings();
 
@@ -1419,21 +1427,34 @@ const ClipboardIndicator = GObject.registerClass({
         SHOW_PREVIEW_BUTTON         = settings.get_boolean(PrefsFields.SHOW_PREVIEW_BUTTON);
     }
 
-    async _onSettingsChange () {
-        try {
-            // Load the settings into variables
-            this._fetchSettings();
+    // The menu exists from here on; each handler redoes only what its keys
+    // change. next-history-clear, which the timer writes itself, and keys
+    // read when used are left to the fetch connected in _loadSettings.
+    _connectMenuSettings () {
+        const { settings } = this.extension;
+        const connect = (keys, handler) => {
+            for (const key of keys)
+                settings.connectObject(`changed::${key}`, handler, this);
+        };
 
-            // If the toggle is hidden but private mode is on, force it off now
-            if (!SHOW_PRIVATE_MODE && PRIVATEMODE && this.privateModeMenuItem) {
+        connect([PrefsFields.HISTORY_SIZE], () => this._removeOldestEntries());
+        connect([PrefsFields.SHOW_PRIVATE_MODE], () => {
+            // a hidden switch cannot turn private mode off again
+            if (!SHOW_PRIVATE_MODE && PRIVATEMODE) {
                 this.privateModeMenuItem.setToggleState(false);
                 this._onPrivateModeSwitch();
             }
-
-            // Remove old entries in case the registry size changed
-            this._removeOldestEntries();
-
-            // Re-set menu-items lables in case preview size changed
+            this.#showElements();
+        });
+        connect([
+            PrefsFields.PREVIEW_SIZE,
+            PrefsFields.PASTE_BUTTON,
+            PrefsFields.SHOW_DELETE_BUTTON,
+            PrefsFields.SHOW_TAG_BUTTON,
+            PrefsFields.SHOW_PIN_BUTTON,
+            PrefsFields.SHOW_EDIT_BUTTON,
+            PrefsFields.SHOW_PREVIEW_BUTTON,
+        ], () => {
             this._getAllIMenuItems().forEach(mItem => {
                 this._setEntryLabel(mItem);
                 mItem.pasteBtn.visible = PASTE_BUTTON;
@@ -1443,23 +1464,20 @@ const ClipboardIndicator = GObject.registerClass({
                 if (mItem.editBtn) mItem.editBtn.visible = SHOW_EDIT_BUTTON;
                 if (mItem.imagePreviewBtn) mItem.imagePreviewBtn.visible = SHOW_PREVIEW_BUTTON;
             });
-
-            //update topbar
+        });
+        connect([
+            PrefsFields.TOPBAR_DISPLAY_MODE_ID,
+            PrefsFields.TOPBAR_PREVIEW_SIZE,
+            PrefsFields.DISABLE_DOWN_ARROW,
+        ], () => {
             this._updateTopbarLayout();
-            this.#updateIndicatorContent(await this.#getClipboardContent());
-
-            // Bind or unbind shortcuts
-            if (ENABLE_KEYBINDING)
-                this._bindShortcuts();
-            else
-                this._unbindShortcuts();
-
-            // Respect UI toggles
-            this.#showElements();
-        } catch (e) {
-            console.error('Clipboard Indicator: Failed to update registry');
-            console.error(e);
-        }
+            this.#updateIndicatorContent(this._getCurrentlySelectedItem()?.entry);
+        });
+        connect([
+            PrefsFields.SHOW_SEARCH_BAR,
+            PrefsFields.SHOW_SETTINGS_BUTTON,
+            PrefsFields.SHOW_CLEAR_HISTORY_BUTTON,
+        ], () => this.#showElements());
     }
 
     _bindShortcuts () {
@@ -1521,11 +1539,7 @@ const ClipboardIndicator = GObject.registerClass({
     }
 
     _disconnectSettings () {
-        if (!this._settingsChangedId)
-            return;
-
-        this.extension.settings.disconnect(this._settingsChangedId);
-        this._settingsChangedId = null;
+        this.extension.settings.disconnectObject(this);
 
         if (this._intervalSettingChangedId) {
             this.extension.settings.disconnect(this._intervalSettingChangedId);
