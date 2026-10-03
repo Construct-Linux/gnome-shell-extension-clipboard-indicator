@@ -278,6 +278,16 @@ const ClipboardIndicator = GObject.registerClass({
         this._entryItem.add_child(this.searchEntry);
 
         this.menu.connect('open-state-changed', (self, open) => {
+            // the countdown ticks only while it can be seen
+            if (this._timerIntervalId) {
+                clearInterval(this._timerIntervalId);
+                this._timerIntervalId = null;
+            }
+            if (open && CLEAR_HISTORY_ON_INTERVAL) {
+                this._updateIntervalTimer();
+                this._timerIntervalId = setInterval(() => this._updateIntervalTimer(), 1000);
+            }
+
             this._setFocusOnOpenTimeout = setTimeout(() => {
                 if (!open) return;
 
@@ -1112,8 +1122,6 @@ const ClipboardIndicator = GObject.registerClass({
     }
 
     _setupHistoryIntervalClearing() {
-        this._fetchSettings();
-
         if (this._intervalSettingChangedId) {
             this.extension.settings.disconnect(this._intervalSettingChangedId);
             this._intervalSettingChangedId = null;
@@ -1151,29 +1159,16 @@ const ClipboardIndicator = GObject.registerClass({
             this._scheduleNextHistoryClear();
         }
         else { //timer already set, but not expired
-            // Clean up existing timers before reassigning
-            if (this._historyClearTimeoutId) {
-                clearTimeout(this._historyClearTimeoutId);
-                this._historyClearTimeoutId = null;
-            }
-            if (this._timerIntervalId) {
-                clearInterval(this._timerIntervalId);
-                this._timerIntervalId = null;
-            }
-            
             const timeoutMs = (NEXT_HISTORY_CLEAR - currentTime) * 1000;
             this._historyClearTimeoutId = setTimeout(() => {
                 this._clearHistory(true);
                 this._scheduleNextHistoryClear();
             }, timeoutMs);
-            this._timerIntervalId = setInterval(() => {
-                this._updateIntervalTimer();
-            }, 1000);
+            this._updateIntervalTimer();
         }
     }
 
     _onHistoryIntervalClearSettingsChanged(_settings, key) {
-        this._fetchSettings();
         if (key === PrefsFields.CLEAR_HISTORY_INTERVAL) {
             this._scheduleNextHistoryClear();
         }
@@ -1188,9 +1183,6 @@ const ClipboardIndicator = GObject.registerClass({
     }
 
     _scheduleNextHistoryClear() {
-        this._fetchSettings();
-
-        clearInterval(this._timerIntervalId);
         if (this._historyClearTimeoutId) {
             clearTimeout(this._historyClearTimeoutId);
             this._historyClearTimeoutId = null;
@@ -1208,9 +1200,6 @@ const ClipboardIndicator = GObject.registerClass({
         this.extension.settings.set_int(PrefsFields.NEXT_HISTORY_CLEAR, NEXT_HISTORY_CLEAR);
 
         this._updateIntervalTimer();
-        this._timerIntervalId = setInterval(() => {
-            this._updateIntervalTimer();
-        }, 1000);
 
         this._historyClearTimeoutId = setTimeout(() => {
             this._clearHistory(true);
@@ -1224,18 +1213,14 @@ const ClipboardIndicator = GObject.registerClass({
             clearTimeout(this._historyClearTimeoutId);
             this._historyClearTimeoutId = null;
         }
-        clearInterval(this._timerIntervalId);
-        this._timerIntervalId = null;
         this._updateIntervalTimer();
         this.extension.settings.set_int(PrefsFields.NEXT_HISTORY_CLEAR, -1);
     }
 
     _updateIntervalTimer() {
-        this._fetchSettings();
         this.resetTimerButton.visible = CLEAR_HISTORY_ON_INTERVAL;
         this.timerLabel.visible = CLEAR_HISTORY_ON_INTERVAL;
         if (!CLEAR_HISTORY_ON_INTERVAL) return;
-
 
         let currentTime = Math.ceil(new Date().getTime() / 1000);
         let timeLeft = NEXT_HISTORY_CLEAR - currentTime;
