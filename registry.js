@@ -216,7 +216,7 @@ export class Registry {
     }
 
     getEntryFilename (entry) {
-        return `${this.REGISTRY_DIR}/${entry.asBytes().hash()}`;
+        return `${this.REGISTRY_DIR}/${entry.hash()}`;
     }
 
     async writeEntryFile (entry) {
@@ -275,6 +275,8 @@ export class ClipboardEntry {
     #mimetype;
     #bytes;
     #favorite;
+    #text = null;
+    #hash = null;
 
     static __isText (mimetype) {
         return mimetype.startsWith('text/') ||
@@ -285,10 +287,10 @@ export class ClipboardEntry {
     static async fromJSON (jsonEntry) {
         const mimetype = jsonEntry.mimetype || 'text/plain;charset=utf-8';
         const favorite = jsonEntry.favorite;
-        let bytes;
+        let entry;
 
         if (ClipboardEntry.__isText(mimetype)) {
-            bytes = new TextEncoder().encode(jsonEntry.contents);
+            entry = ClipboardEntry.fromText(mimetype, jsonEntry.contents, favorite);
         }
         else {
             const filename = jsonEntry.contents;
@@ -296,7 +298,7 @@ export class ClipboardEntry {
 
             let file = Gio.file_new_for_path(filename);
 
-            bytes = await new Promise((resolve, reject) => file.load_contents_async(null, (obj, res) => {
+            const bytes = await new Promise((resolve, reject) => file.load_contents_async(null, (obj, res) => {
                 let [success, contents] = obj.load_contents_finish(res);
 
                 if (success) {
@@ -308,13 +310,21 @@ export class ClipboardEntry {
                     );
                 }
             }));
+            entry = new ClipboardEntry(mimetype, new GLib.Bytes(bytes), favorite);
         }
 
-        const entry = new ClipboardEntry(mimetype, bytes, favorite);
         if (jsonEntry.tag) entry.setTag(jsonEntry.tag);
         return entry;
     }
 
+    static fromText (mimetype, text, favorite) {
+        const entry = new ClipboardEntry(mimetype, new GLib.Bytes(new TextEncoder().encode(text)), favorite);
+        entry.#text = text;
+        return entry;
+    }
+
+    // bytes is the GLib.Bytes the clipboard handed over: it is kept as is and
+    // handed back to St.Clipboard.set_content, never copied
     constructor (mimetype, bytes, favorite) {
         this.#mimetype = mimetype;
         this.#bytes = bytes;
@@ -323,9 +333,21 @@ export class ClipboardEntry {
 
     getStringValue () {
         if (this.isImage()) {
-            return `[Image ${this.asBytes().hash()}]`;
+            return `[Image ${this.hash().slice(0, 12)}]`;
         }
-        return new TextDecoder().decode(this.#bytes);
+        this.#text ??= new TextDecoder().decode(this.#bytes.toArray());
+        return this.#text;
+    }
+
+    // SHA-256 of the contents, computed once: it names the image file and
+    // decides equality without comparing the bytes
+    hash () {
+        this.#hash ??= GLib.compute_checksum_for_bytes(GLib.ChecksumType.SHA256, this.#bytes);
+        return this.#hash;
+    }
+
+    size () {
+        return this.#bytes.get_size();
     }
 
     mimetype () {
@@ -350,7 +372,9 @@ export class ClipboardEntry {
 
     setText (text) {
         if (!this.isText()) return;
-        this.#bytes = new TextEncoder().encode(text);
+        this.#bytes = new GLib.Bytes(new TextEncoder().encode(text));
+        this.#text = text;
+        this.#hash = null;
     }
 
     #tag = null;
@@ -364,10 +388,19 @@ export class ClipboardEntry {
     }
 
     asBytes () {
-        return GLib.Bytes.new(this.#bytes);
+        return this.#bytes;
     }
 
+    // Text compares as text whatever text mimetype carried it; anything else
+    // must match in mimetype, length and hash, cheapest first.
     equals (otherEntry) {
-        return this.getStringValue() === otherEntry.getStringValue();
+        if (this.isText() || otherEntry.isText()) {
+            return this.isText() && otherEntry.isText() &&
+                this.getStringValue() === otherEntry.getStringValue();
+        }
+
+        return this.#mimetype === otherEntry.mimetype() &&
+            this.size() === otherEntry.size() &&
+            this.hash() === otherEntry.hash();
     }
 }

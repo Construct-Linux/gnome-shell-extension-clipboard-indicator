@@ -1909,7 +1909,7 @@ const ClipboardIndicator = GObject.registerClass({
                     type = "text/plain;charset=utf-8";
                 }
 
-                const entry = new ClipboardEntry(type, bytes.get_data(), false);
+                const entry = new ClipboardEntry(type, bytes, false);
                 if (CACHE_IMAGES && entry.isImage()) {
                     this.registry.writeEntryFile(entry);
                 }
