@@ -38,10 +38,6 @@
     color: rgba(255,255,255,0.3);
 }
 
-.clipboard-hidden {
-    display:none!important;
-}
-
 .clipboard-menu-icon {
     width:1em;
     height:1em;
@@ -50,7 +46,6 @@
 
 .clipboard-menu-img-preview {
     border:solid 1px white;
-    overflow:hidden;
     width:1.5em;
     height:1.5em;
     margin:0;
@@ -62,14 +57,6 @@
     width:1em;
     height:1em;
     margin-right:.25em;
-}
-
-.clipboard-indicator-hbox {
-    transition: background-color 150ms ease-in-out;
-}
-
-.clipboard-indicator-hbox .clipboard-indicator-icon {
-    transition: color 150ms ease-in-out;
 }
 
 .ci-tag-label {
