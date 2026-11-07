@@ -26,6 +26,11 @@ plus the patches below, and targets GNOME Shell 51 only.
   is applied before the history loads, so "Text will be here" never shows.
 - **GNOME Shell 51 only**: `metadata.json` lists 51, and the compatibility
   shim for older shells is gone.
+- **No history import or export**: upstream's tar archive in the
+  preferences is left out. Its import cannot restore the fork's images
+  (named by their SHA-256), it rewrites `registry.txt` from the
+  preferences process behind the shell, and it signals the shell through
+  two GSettings keys written to dconf.
 - **Repository trimmed** to what the package is built from: no screenshot,
   extensions.gnome.org zip targets, or committed `.mo` and
   `gschemas.compiled` build outputs.

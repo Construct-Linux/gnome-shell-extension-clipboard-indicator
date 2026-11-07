@@ -61,7 +61,6 @@ let PRIVATEMODE               = false;
 let NOTIFY_ON_COPY            = true;
 let NOTIFY_ON_CYCLE           = true;
 let NOTIFY_ON_CLEAR           = true;
-let NOTIFY_ON_IMPORT_EXPORT   = true;
 let CONFIRM_ON_CLEAR          = true;
 let CONFIRM_ON_PINNED_DELETE  = false;
 let MAX_TOPBAR_LENGTH         = 15;
@@ -1386,7 +1385,6 @@ const ClipboardIndicator = GObject.registerClass({
         NOTIFY_ON_COPY              = settings.get_boolean(PrefsFields.NOTIFY_ON_COPY);
         NOTIFY_ON_CYCLE             = settings.get_boolean(PrefsFields.NOTIFY_ON_CYCLE);
         NOTIFY_ON_CLEAR             = settings.get_boolean(PrefsFields.NOTIFY_ON_CLEAR);
-        NOTIFY_ON_IMPORT_EXPORT     = settings.get_boolean(PrefsFields.NOTIFY_ON_IMPORT_EXPORT);
         CONFIRM_ON_CLEAR            = settings.get_boolean(PrefsFields.CONFIRM_ON_CLEAR);
         CONFIRM_ON_PINNED_DELETE    = settings.get_boolean(PrefsFields.CONFIRM_ON_PINNED_DELETE);
         ENABLE_KEYBINDING           = settings.get_boolean(PrefsFields.ENABLE_KEYBINDING);
@@ -1426,27 +1424,6 @@ const ClipboardIndicator = GObject.registerClass({
             for (const key of keys)
                 settings.connectObject(`changed::${key}`, handler, this);
         };
-
-        // the preferences window reports an import or export through this key
-        connect([PrefsFields.HISTORY_OPERATION_MESSAGE], () => {
-            const message = settings.get_string(PrefsFields.HISTORY_OPERATION_MESSAGE);
-            if (!message)
-                return;
-            if (NOTIFY_ON_IMPORT_EXPORT)
-                this._showNotification(message);
-            settings.set_string(PrefsFields.HISTORY_OPERATION_MESSAGE, '');
-        });
-        connect([PrefsFields.HISTORY_IMPORTED], async () => {
-            try {
-                this.favoritesSection.removeAll();
-                this.historySection.removeAll();
-                this.clipItemsRadioGroup = [];
-                (await this._getCache()).forEach(entry => this._addEntry(entry));
-            }
-            catch (e) {
-                console.error(e);
-            }
-        });
 
         connect([PrefsFields.HISTORY_SIZE], () => this._removeOldestEntries());
         connect([PrefsFields.SHOW_PRIVATE_MODE], () => {
