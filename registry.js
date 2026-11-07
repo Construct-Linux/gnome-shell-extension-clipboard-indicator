@@ -107,8 +107,12 @@ export class Registry {
         this.#writing = true;
         try {
             this.#ensureDir();
+            // REPLACE_DESTINATION makes GIO always write a temp file and
+            // rename it over the registry, never rewrite it in place
+            // (hardlinks, symlinks, ownership it cannot copy), so a crash
+            // mid-write leaves the old history whole
             await Gio.file_new_for_path(this.REGISTRY_PATH).replace_contents_bytes_async(
-                contents, null, false, Gio.FileCreateFlags.NONE, null);
+                contents, null, false, Gio.FileCreateFlags.REPLACE_DESTINATION, null);
         }
         catch (e) {
             console.error('Clipboard Indicator: failed to write the registry');
@@ -167,54 +171,74 @@ export class Registry {
                 file.query_info_async('*', FileQueryInfoFlags.NONE,
                                       GLib.PRIORITY_DEFAULT, null, (src, res) => {
                     // Check if file size is larger than CACHE_FILE_SIZE
-                    // If so, make a backup of file and keep only the favorites,
+                    // If so, make a backup of file, and keep only its favorites,
                     // which exist nowhere else
                     let file_info = src.query_info_finish(res);
                     const oversize = file_info.get_size() >= CACHE_FILE_SIZE * 1024 * 1024;
+                    let source = file;
 
                     if (oversize) {
-                        let destination = Gio.file_new_for_path(this.BACKUP_REGISTRY_PATH);
-
-                        file.copy(destination, FileCopyFlags.OVERWRITE, null, null);
+                        source = Gio.file_new_for_path(this.BACKUP_REGISTRY_PATH);
+                        file.move(source, FileCopyFlags.OVERWRITE, null, null);
                     }
 
-                    file.load_contents_async(null, (obj, res) => {
+                    source.load_contents_async(null, (obj, res) => {
                         let [success, contents] = obj.load_contents_finish(res);
 
                         if (success) {
                             let max_size = this.settings.get_int(PrefsFields.HISTORY_SIZE);
                             const cacheTextData = new TextDecoder().decode(contents);
-                            let registry;
-                            if (cacheTextData.trim().length == 0) {
-                                registry = [];
-                            } else {
+                            let registry = [];
+                            if (cacheTextData.trim().length > 0) {
                                 try {
-                                    registry = JSON.parse(cacheTextData);
+                                    const parsed = JSON.parse(cacheTextData);
+                                    if (!Array.isArray(parsed))
+                                        throw new Error('not a list of entries');
+                                    registry = parsed;
                                 } catch (e) {
-                                    console.error('Clipboard Indicator: cache file contains malformed JSON, starting with empty history');
-                                    console.error(e);
-                                    let destination = Gio.file_new_for_path(this.BACKUP_REGISTRY_PATH);
-                                    file.move(destination, FileCopyFlags.OVERWRITE, null, null);
-                                    resolve([]);
-                                    return;
+                                    // Start with an empty history instead of never
+                                    // loading. Keep the unreadable file as the backup,
+                                    // so the next write does not overwrite it
+                                    console.error(`Clipboard Indicator: could not read registry file, starting with an empty history: ${e.message}`);
+                                    if (!oversize) {
+                                        try {
+                                            file.move(Gio.file_new_for_path(this.BACKUP_REGISTRY_PATH),
+                                                      FileCopyFlags.OVERWRITE, null, null);
+                                        } catch (moveError) {
+                                            console.error(moveError);
+                                        }
+                                    }
                                 }
                             }
                             let clipboardEntries = registry
                                 .map(jsonEntry => ClipboardEntry.fromJSON(jsonEntry, this.REGISTRY_DIR))
-                                .filter(entry => entry !== null)
-                                .filter(entry => !oversize || entry.isFavorite());
+                                .filter(entry => entry !== null);
 
-                            let registryNoFavorite = clipboardEntries
-                                .filter(entry => !entry.isFavorite());
+                            if (oversize) {
+                                const favorites = clipboardEntries
+                                    .filter(entry => entry.isFavorite());
 
-                            while (registryNoFavorite.length > max_size) {
-                                let oldestNoFavorite = registryNoFavorite.shift();
-                                let itemIdx = clipboardEntries.indexOf(oldestNoFavorite);
-                                clipboardEntries.splice(itemIdx,1);
+                                // Nothing else rewrites the registry until the
+                                // next clipboard change, so persist favorites now
+                                resolve(favorites);
+                                this.write(favorites);
 
-                                registryNoFavorite = clipboardEntries.filter(
-                                    entry => !entry.isFavorite()
-                                );
+                                return;
+                            }
+
+                            // Drop the oldest unpinned entries beyond the
+                            // history size, in a single pass
+                            let excess = clipboardEntries
+                                .filter(entry => !entry.isFavorite()).length - max_size;
+
+                            if (excess > 0) {
+                                clipboardEntries = clipboardEntries.filter(entry => {
+                                    if (excess > 0 && !entry.isFavorite()) {
+                                        excess--;
+                                        return false;
+                                    }
+                                    return true;
+                                });
                             }
 
                             resolve(clipboardEntries);

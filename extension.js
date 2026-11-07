@@ -61,6 +61,7 @@ let PRIVATEMODE               = false;
 let NOTIFY_ON_COPY            = true;
 let NOTIFY_ON_CYCLE           = true;
 let NOTIFY_ON_CLEAR           = true;
+let NOTIFY_ON_IMPORT_EXPORT   = true;
 let CONFIRM_ON_CLEAR          = true;
 let CONFIRM_ON_PINNED_DELETE  = false;
 let MAX_TOPBAR_LENGTH         = 15;
@@ -114,6 +115,8 @@ const ClipboardIndicator = GObject.registerClass({
     #refreshInProgress = false;
     #_imagePreviewOverlay = null;
     #settingClipboard = false;
+    #moveFirstOnClose = [];
+    #moveFirstClosedId = 0;
 
     destroy () {
         this._destroyed = true;
@@ -167,7 +170,7 @@ const ClipboardIndicator = GObject.registerClass({
         });
 
         this._buttonText = new St.Label({
-            text: '...',
+            text: _('...'),
             y_align: Clutter.ActorAlign.CENTER
         });
 
@@ -658,8 +661,8 @@ const ClipboardIndicator = GObject.registerClass({
         // CLICK fix for Paste on Select: clicking behaves like Enter
         menuItem.connect('activate', () => {
             if (PASTE_ON_SELECT) {
-                this.#pasteItem(menuItem);
                 this._onMenuItemSelectedAndMenuClose(menuItem, false);
+                this.#pasteItem(menuItem);
             } else {
                 this._onMenuItemSelectedAndMenuClose(menuItem, true);
             }
@@ -713,8 +716,8 @@ const ClipboardIndicator = GObject.registerClass({
                 case Clutter.KEY_KP_Enter:
                 case Clutter.KEY_Return:
                     if (PASTE_ON_SELECT) {
-                        this.#pasteItem(menuItem);
                         this._onMenuItemSelectedAndMenuClose(menuItem, false);
+                        this.#pasteItem(menuItem);
                     } else {
                         this._onMenuItemSelectedAndMenuClose(menuItem, true);
                     }
@@ -907,11 +910,16 @@ const ClipboardIndicator = GObject.registerClass({
 
     _clearHistory (invokedAutomatically = false) {
         // Don't remove pinned items
-        this.historySection._getMenuItems().forEach(mItem => {
-            if (KEEP_SELECTED_ON_CLEAR === false || !mItem.currentlySelected) {
-                this._removeEntry(mItem, 'delete');
-            }
-        });
+        const toRemove = this.historySection._getMenuItems().filter(mItem =>
+            KEEP_SELECTED_ON_CLEAR === false || !mItem.currentlySelected);
+
+        // Remove everything first, then write the registry and update the
+        // menu once, instead of once per removed entry.
+        toRemove.forEach(mItem => this._removeEntry(mItem, 'delete', true));
+        if (toRemove.length > 0) {
+            this._updateCache();
+            this.#showElements();
+        }
 
         if (NOTIFY_ON_CLEAR) {
             const message = invokedAutomatically
@@ -931,7 +939,7 @@ const ClipboardIndicator = GObject.registerClass({
         }
     }
 
-    _removeEntry (menuItem, event) {
+    _removeEntry (menuItem, event, deferUpdates = false) {
         let itemIdx = this.clipItemsRadioGroup.indexOf(menuItem);
 
         if(event === 'delete' && menuItem.currentlySelected) {
@@ -946,27 +954,26 @@ const ClipboardIndicator = GObject.registerClass({
             this.registry.deleteEntryFile(menuItem.entry);
         }
 
+        // The caller updates the cache and the menu once when removing many
+        if (deferUpdates) return;
+
         this._updateCache();
         this.#showElements();
     }
 
     _removeOldestEntries () {
-        let clipItemsRadioGroupNoFavorite = this.clipItemsRadioGroup.filter(
+        const noFavorite = this.clipItemsRadioGroup.filter(
             item => item.entry.isFavorite() === false);
+        const excess = noFavorite.length - MAX_REGISTRY_LENGTH;
 
-        const origSize = clipItemsRadioGroupNoFavorite.length;
+        if (excess <= 0) return;
 
-        while (clipItemsRadioGroupNoFavorite.length > MAX_REGISTRY_LENGTH) {
-            let oldestNoFavorite = clipItemsRadioGroupNoFavorite.shift();
-            this._removeEntry(oldestNoFavorite);
-
-            clipItemsRadioGroupNoFavorite = this.clipItemsRadioGroup.filter(
-                item => item.entry.isFavorite() === false);
-        }
-
-        if (clipItemsRadioGroupNoFavorite.length < origSize) {
-            this._updateCache();
-        }
+        // Remove the oldest first, then write the registry and update the
+        // menu once, instead of once per removed entry
+        noFavorite.slice(0, excess)
+            .forEach(item => this._removeEntry(item, undefined, true));
+        this._updateCache();
+        this.#showElements();
     }
 
     _onMenuItemSelected (menuItem, autoSet) {
@@ -1070,7 +1077,7 @@ const ClipboardIndicator = GObject.registerClass({
                         this._selectMenuItem(menuItem, false);
 
                         if (!menuItem.entry.isFavorite() && MOVE_ITEM_FIRST) {
-                            this._moveItemFirst(menuItem);
+                            this.#moveItemFirstWhenClosed(menuItem);
                         }
 
                         return;
@@ -1106,6 +1113,32 @@ const ClipboardIndicator = GObject.registerClass({
         this._removeEntry(item, 'move');
         this._addEntry(item.entry, item.currentlySelected, false);
         this._updateCache();
+    }
+
+    // Reordering the items while the menu is on screen, open or closing, can put
+    // another item under the pointer. That item then takes the key focus and
+    // swallows the keys of a paste, so wait until the menu has closed
+    #moveItemFirstWhenClosed (item) {
+        if (!this.menu.isOpen && !this.menu.actor.visible) {
+            this._moveItemFirst(item);
+            return;
+        }
+
+        // Replay the requests in order, so the result matches moving each right away
+        this.#moveFirstOnClose.push(item.entry);
+        if (this.#moveFirstClosedId) return;
+
+        this.#moveFirstClosedId = this.menu.connect('menu-closed', () => {
+            this.menu.disconnect(this.#moveFirstClosedId);
+            this.#moveFirstClosedId = 0;
+
+            const entries = this.#moveFirstOnClose;
+            this.#moveFirstOnClose = [];
+            for (const entry of entries) {
+                const pending = this.clipItemsRadioGroup.find(m => m.entry === entry);
+                if (pending && !pending.entry.isFavorite()) this._moveItemFirst(pending);
+            }
+        });
     }
 
     _getCurrentlySelectedItem () {
@@ -1353,6 +1386,7 @@ const ClipboardIndicator = GObject.registerClass({
         NOTIFY_ON_COPY              = settings.get_boolean(PrefsFields.NOTIFY_ON_COPY);
         NOTIFY_ON_CYCLE             = settings.get_boolean(PrefsFields.NOTIFY_ON_CYCLE);
         NOTIFY_ON_CLEAR             = settings.get_boolean(PrefsFields.NOTIFY_ON_CLEAR);
+        NOTIFY_ON_IMPORT_EXPORT     = settings.get_boolean(PrefsFields.NOTIFY_ON_IMPORT_EXPORT);
         CONFIRM_ON_CLEAR            = settings.get_boolean(PrefsFields.CONFIRM_ON_CLEAR);
         CONFIRM_ON_PINNED_DELETE    = settings.get_boolean(PrefsFields.CONFIRM_ON_PINNED_DELETE);
         ENABLE_KEYBINDING           = settings.get_boolean(PrefsFields.ENABLE_KEYBINDING);
@@ -1392,6 +1426,27 @@ const ClipboardIndicator = GObject.registerClass({
             for (const key of keys)
                 settings.connectObject(`changed::${key}`, handler, this);
         };
+
+        // the preferences window reports an import or export through this key
+        connect([PrefsFields.HISTORY_OPERATION_MESSAGE], () => {
+            const message = settings.get_string(PrefsFields.HISTORY_OPERATION_MESSAGE);
+            if (!message)
+                return;
+            if (NOTIFY_ON_IMPORT_EXPORT)
+                this._showNotification(message);
+            settings.set_string(PrefsFields.HISTORY_OPERATION_MESSAGE, '');
+        });
+        connect([PrefsFields.HISTORY_IMPORTED], async () => {
+            try {
+                this.favoritesSection.removeAll();
+                this.historySection.removeAll();
+                this.clipItemsRadioGroup = [];
+                (await this._getCache()).forEach(entry => this._addEntry(entry));
+            }
+            catch (e) {
+                console.error(e);
+            }
+        });
 
         connect([PrefsFields.HISTORY_SIZE], () => this._removeOldestEntries());
         connect([PrefsFields.SHOW_PRIVATE_MODE], () => {
@@ -1812,6 +1867,11 @@ const ClipboardIndicator = GObject.registerClass({
             orientation: Clutter.Orientation.VERTICAL,
         });
 
+        // Use the theme's text color, so the text shows in light mode too
+        textBox.connect('style-changed', () => {
+            clutterText.color = textBox.get_theme_node().get_foreground_color();
+        });
+
         textBox.add_child(clutterText);
 
         scrollView.add_child(textBox);
@@ -1908,7 +1968,7 @@ const ClipboardIndicator = GObject.registerClass({
         const menuItem = this.clipItemsRadioGroup.find(item => item.entry === entry);
         if (MOVE_ITEM_FIRST && menuItem && !entry.isFavorite() &&
             menuItem !== this.clipItemsRadioGroup.at(-1))
-            this._moveItemFirst(menuItem);
+            this.#moveItemFirstWhenClosed(menuItem);
     }
 
     // Asks the owner only for formats it offers, best first; a format that
