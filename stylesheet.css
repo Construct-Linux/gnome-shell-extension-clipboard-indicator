@@ -1,5 +1,7 @@
 .clipboard-indicator-hbox.private-mode {
-    color: rgba(255,255,255,0.3);
+    /* The brand's muted text (palette.toml): white at 0.3 was 2:1 on the bar, under the 3:1 an
+       icon needs. */
+    color: #9FB3C0;
 }
 
 .ci-history-menu-section .popup-menu-item {
@@ -18,7 +20,7 @@
 
 .clipboard-indicator-empty-state {
     width:350px;
-    color:#aaa;
+    color:#9FB3C0;
 }
 
 .clipboard-indicator-empty-state StIcon {
@@ -35,7 +37,7 @@
 }
 
 .ci-main-menu-section StButton.ci-pin-btn {
-    color: rgba(255,255,255,0.3);
+    color: #9FB3C0;
 }
 
 .clipboard-menu-icon {
@@ -45,7 +47,8 @@
 }
 
 .clipboard-menu-img-preview {
-    border:solid 1px white;
+    /* The brand's border line, the edge every surface takes. */
+    border:solid 1px #2A3843;
     width:1.5em;
     height:1.5em;
     margin:0;
@@ -53,24 +56,25 @@
 }
 
 .clipboard-indicator-img-preview {
-    border:solid 1px white;
+    border:solid 1px #2A3843;
     width:1em;
     height:1em;
     margin-right:.25em;
 }
 
 .ci-tag-label {
+    /* A chip of the brand's border colour with text: muted text on a fill fell under 4.5:1, and
+       a control's radius is 9. */
     font-size: 0.8em;
-    color: rgba(255, 255, 255, 0.6);
-    background-color: rgba(255, 255, 255, 0.1);
-    border-radius: 4px;
-    padding: 1px 6px;
+    color: #E6EDF2;
+    background-color: #2A3843;
+    border-radius: 9px;
+    padding: 0 6px;
     margin: 0 6px;
 }
 
 .ci-edit-textbox {
-    background-color: rgba(127, 127, 127, 0.15);
-    border-radius: 4px;
-    padding: 8px;
+    /* The theme's entry: its own fill, radius and focus ring. */
+    padding: 6px;
     min-width: 384px;
 }

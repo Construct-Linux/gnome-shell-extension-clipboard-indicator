@@ -234,15 +234,14 @@ const ClipboardIndicator = GObject.registerClass({
             return;
         }
 
-        // Set inverted colors
-        this.set_style('background-color: rgba(255, 255, 255, 0.9);');
-        this.icon.set_style('color: rgba(0, 0, 0, 0.9);');
+        // The panel button pressed, as the theme draws it: an inline white block glared in a
+        // dark bar and was no colour of the theme's.
+        this.add_style_pseudo_class('active');
 
         // Revert back to normal after delay
         this._blinkAnimationTimeout = setTimeout(() => {
             this._blinkAnimationTimeout = null;
-            this.set_style(null);
-            this.icon.set_style(null);
+            this.remove_style_pseudo_class('active');
         }, 200);
     }
 
